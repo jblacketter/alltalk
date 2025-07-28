@@ -1,140 +1,268 @@
 # Dream Journal Deployment Guide
 
-## Deploying to Render
+## Deployment to Render
 
-### Prerequisites
-1. A [Render](https://render.com) account
-2. Your Algolia API credentials
-3. (Optional) OpenAI API key for AI features
+This guide covers deploying the Dream Journal application to Render with PostgreSQL and Algolia search.
 
-### Deployment Steps
+## Prerequisites
 
-1. **Fork/Push to GitHub**
-   - Ensure your code is pushed to a GitHub repository
+- GitHub account with the repository
+- Render account
+- Algolia account (optional but recommended)
+- OpenAI API key (optional for AI features)
 
-2. **Create a New Web Service on Render**
-   - Log in to Render
+## Step-by-Step Deployment
+
+### 1. Initial Deployment
+
+1. **Fork or Push Repository**
+   - Ensure your code is pushed to GitHub
+   - Repository should be accessible from your Render account
+
+2. **Create New Web Service on Render**
+   - Go to [Render Dashboard](https://dashboard.render.com)
    - Click "New +" → "Web Service"
    - Connect your GitHub repository
-   - Render will auto-detect the `render.yaml` configuration
+   - Select the `alltalk` repository
 
-3. **Environment Variables**
-   Set these in Render's dashboard:
-   - `ALGOLIA_APPLICATION_ID`: Your Algolia app ID
-   - `ALGOLIA_API_KEY`: Your Algolia admin API key
-   - `ALGOLIA_SEARCH_API_KEY`: Your Algolia search-only API key
-   - `OPENAI_API_KEY`: (Optional) Your OpenAI API key
+3. **Configure Build Settings**
+   - **Name**: dreamjournal (or your preferred name)
+   - **Runtime**: Python
+   - **Build Command**: `./build.sh`
+   - **Start Command**: `gunicorn dreamjournal.wsgi:application`
 
-4. **Deploy**
+### 2. Environment Variables
+
+Add these environment variables in Render dashboard:
+
+```
+# Required
+SECRET_KEY=<click-generate> (Render will generate this)
+DEBUG=false
+ALLOWED_HOSTS=alltalk.onrender.com (or your-app-name.onrender.com)
+
+# Database - DO NOT SET DATABASE_URL
+# Render automatically provides DATABASE_URL for PostgreSQL
+
+# Optional - Algolia Search
+ALGOLIA_APPLICATION_ID=your-app-id
+ALGOLIA_API_KEY=your-admin-key
+ALGOLIA_SEARCH_API_KEY=your-search-key
+
+# Optional - OpenAI
+OPENAI_API_KEY=your-openai-key
+```
+
+**Important**: Do NOT set DATABASE_URL manually. Render automatically provides this for PostgreSQL.
+
+### 3. Deploy and Initialize
+
+1. **Deploy the Application**
    - Click "Create Web Service"
-   - Render will automatically:
-     - Create a PostgreSQL database
-     - Install dependencies
-     - Run migrations
-     - Initialize Algolia index
-     - Start the application
+   - Wait for the build to complete
 
-5. **Post-Deployment**
-   - Visit `https://your-app.onrender.com/admin`
-   - Create a superuser via Render Shell:
-     ```bash
-     python manage.py createsuperuser
-     ```
-
-### Data Migration from Local
-
-1. **Export local data:**
+2. **Run Database Migrations**
+   - Go to your service dashboard
+   - Click "Shell" tab
+   - Run:
    ```bash
-   ./export_data.sh
+   python manage.py migrate
    ```
 
-2. **In Render Shell:**
+3. **Create Superuser**
    ```bash
-   # Upload fixtures directory to Render
-   python manage.py loaddata fixtures/users.json
-   python manage.py loaddata fixtures/dreams.json
-   python manage.py loaddata fixtures/patterns.json
-   python manage.py loaddata fixtures/sharing.json
+   python manage.py createsuperuser
    ```
 
-### Media Storage
+4. **Initialize Algolia Index** (if configured)
+   ```bash
+   python manage.py init_algolia_index
+   ```
 
-For production, you'll need to set up external media storage:
+### 4. Verify Deployment
 
-#### Option 1: Cloudinary (Recommended)
-1. Create a [Cloudinary](https://cloudinary.com) account
-2. Install: `pip install django-cloudinary-storage`
-3. Add to `INSTALLED_APPS`:
+1. Visit your app at `https://your-app-name.onrender.com`
+2. Log in with your superuser credentials
+3. Test creating a dream entry
+4. If using Algolia, test the search functionality
+
+## Troubleshooting
+
+### Database Connection Issues
+
+If you see SQLite errors after deployment:
+
+1. **Check Environment Variables**
+   - Ensure DATABASE_URL is NOT set in Render environment variables
+   - The app should use Render's automatically provided PostgreSQL URL
+
+2. **Verify Database Configuration**
+   - Open Render Shell
+   - Run Python shell and check database settings:
    ```python
-   'cloudinary_storage',
-   'cloudinary',
-   ```
-4. Configure in settings:
-   ```python
-   CLOUDINARY_STORAGE = {
-       'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME'),
-       'API_KEY': os.getenv('CLOUDINARY_API_KEY'),
-       'API_SECRET': os.getenv('CLOUDINARY_API_SECRET'),
-   }
-   DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+   python manage.py shell
+   >>> from django.conf import settings
+   >>> print(settings.DATABASES['default']['ENGINE'])
+   # Should show: django.db.backends.postgresql
    ```
 
-#### Option 2: Render Disk ($7/month)
-- Add a disk in Render dashboard
-- Mount at `/media`
-- Update `MEDIA_ROOT` in settings
+3. **Clear and Restart**
+   - If still seeing SQLite errors, restart the service
+   - Wait for complete redeployment
 
-### Custom Domain
+### Import Errors
 
-1. In Render dashboard → Settings → Custom Domains
-2. Add your domain
-3. Update DNS records as instructed
-4. Update `ALLOWED_HOSTS` environment variable
+If you encounter import errors with Algolia:
+- The codebase has been updated to use the newer algoliasearch-django API
+- Ensure you're using the latest code from the repository
 
-### Monitoring
+### Static Files Not Loading
 
-- Render provides basic logs and metrics
-- For advanced monitoring, consider:
-  - Sentry for error tracking
-  - New Relic for performance monitoring
+- WhiteNoise is configured to serve static files
+- Run `python manage.py collectstatic` (included in build.sh)
+- Check that `STATIC_ROOT` is properly configured
 
-### Troubleshooting
+### ALLOWED_HOSTS Error
 
-**Static files not loading:**
-- Run `python manage.py collectstatic`
-- Check WhiteNoise configuration
+- Update ALLOWED_HOSTS environment variable to include your Render domain
+- Format: `your-app-name.onrender.com` or `.onrender.com` for any subdomain
 
-**Database connection errors:**
-- Verify `DATABASE_URL` is set correctly
-- Check PostgreSQL addon status
+## Local Development vs Production
 
-**Algolia search not working:**
-- Verify API keys are correct
-- Run `python manage.py init_algolia_index`
-- Check browser console for errors
+### Key Differences
+
+1. **Database**
+   - Local: SQLite (default) or PostgreSQL
+   - Production: PostgreSQL (provided by Render)
+
+2. **Static Files**
+   - Local: Django serves static files
+   - Production: WhiteNoise serves static files
+
+3. **Debug Mode**
+   - Local: DEBUG=True
+   - Production: DEBUG=false
+
+4. **Environment Variables**
+   - Local: .env file
+   - Production: Render dashboard
+
+### Switching Between Environments
+
+To ensure smooth switching:
+
+1. **Local .env file**
+   ```env
+   # Remove or comment out DATABASE_URL for local SQLite
+   # DATABASE_URL=sqlite:///db.sqlite3
+   
+   # Or use local PostgreSQL
+   # DATABASE_URL=postgresql://user:pass@localhost/dreamjournal_dev
+   ```
+
+2. **Production Settings**
+   - Never commit .env file
+   - Always use environment variables in production
+   - Keep DEBUG=false in production
+
+## Data Migration
+
+### From SQLite to PostgreSQL
+
+If migrating existing data:
+
+1. **Export from SQLite** (local)
+   ```bash
+   python manage.py dumpdata --exclude contenttypes --exclude auth.permission > data.json
+   ```
+
+2. **Import to PostgreSQL** (Render Shell)
+   ```bash
+   python manage.py loaddata data.json
+   ```
 
 ### Backup Strategy
 
-1. **Database:**
-   - Render provides daily backups on paid plans
+1. **Database Backups**
+   - Render provides automatic daily backups (paid plans)
    - Manual backup: `pg_dump $DATABASE_URL > backup.sql`
 
-2. **Media files:**
-   - If using Cloudinary, files are already backed up
-   - If using disk, set up regular backups
+2. **Media Files**
+   - Consider using Cloudinary or AWS S3 for media storage
+   - Not included in database backups
 
-### Updates
+## Performance Optimization
 
-To deploy updates:
-1. Push changes to GitHub
-2. Render will automatically rebuild and deploy
-3. Migrations run automatically via `build.sh`
+1. **Database Queries**
+   - Use `select_related()` and `prefetch_related()`
+   - Monitor slow queries in production
 
-### Security Checklist
+2. **Caching**
+   - Consider adding Redis for caching (Render add-on)
+   - Cache expensive computations
 
-- [ ] Change `SECRET_KEY` from default
-- [ ] Set `DEBUG=False`
-- [ ] Use HTTPS (automatic on Render)
+3. **Search Performance**
+   - Algolia provides fast search
+   - Index only necessary fields
+
+## Security Checklist
+
+- [ ] DEBUG=false in production
+- [ ] SECRET_KEY is randomly generated
+- [ ] ALLOWED_HOSTS is properly configured
+- [ ] SSL is enabled (automatic on Render)
+- [ ] Sensitive data is not logged
+- [ ] API keys are kept secret
 - [ ] Regular security updates
-- [ ] Strong admin passwords
-- [ ] Review privacy settings
+
+## Monitoring
+
+1. **Application Logs**
+   - View in Render dashboard
+   - Set up log alerts for errors
+
+2. **Performance Monitoring**
+   - Monitor response times
+   - Track database query performance
+
+3. **Error Tracking**
+   - Consider adding Sentry for error tracking
+   - Monitor 500 errors
+
+## Maintenance
+
+### Regular Tasks
+
+1. **Update Dependencies**
+   ```bash
+   pip list --outdated
+   pip install --upgrade package-name
+   ```
+
+2. **Database Maintenance**
+   - Regular backups
+   - Monitor database size
+   - Optimize queries as needed
+
+3. **Security Updates**
+   - Keep Django updated
+   - Monitor security advisories
+
+### Scaling
+
+When your app grows:
+
+1. **Upgrade Render Plan**
+   - More CPU/RAM for web service
+   - Larger database
+
+2. **Add Services**
+   - Redis for caching
+   - CDN for static files
+   - Background job processing
+
+## Support
+
+- **Render Documentation**: https://render.com/docs
+- **Django Documentation**: https://docs.djangoproject.com/
+- **Project Issues**: https://github.com/jblacketter/alltalk/issues

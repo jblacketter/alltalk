@@ -19,6 +19,9 @@ class DreamIndex(AlgoliaIndex):
         'lucidity_level',
     ]
     
+    # Custom primary key field
+    custom_objectID = 'id'
+    
     # Settings for search
     settings = {
         'searchableAttributes': [
@@ -60,6 +63,14 @@ class DreamIndex(AlgoliaIndex):
             'has_voice': bool(obj.voice_recording),
             '_tags': self._get_tags(obj),
         }
+    
+    def _should_index(self, obj):
+        """Custom should_index method to handle the check properly."""
+        return obj.privacy_level == 'community'
+    
+    def get_model_obj_id(self, obj):
+        """Return the object ID as a string to handle UUID primary keys."""
+        return str(obj.id)
     
     def _get_tags(self, obj):
         """Generate searchable tags."""
