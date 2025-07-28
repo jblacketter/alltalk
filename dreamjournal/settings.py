@@ -88,17 +88,32 @@ WSGI_APPLICATION = 'dreamjournal.wsgi.application'
 
 # Database configuration
 DATABASE_URL = os.getenv('DATABASE_URL')
+
+# Debug logging for database configuration
+import sys
+if 'runserver' not in sys.argv and 'shell' not in sys.argv:
+    print(f"DEBUG: DATABASE_URL exists: {bool(DATABASE_URL)}")
+    print(f"DEBUG: DEBUG setting: {DEBUG}")
+    if DATABASE_URL:
+        print(f"DEBUG: DATABASE_URL starts with: {DATABASE_URL[:30]}...")
+
+# On Render, DATABASE_URL is automatically provided
+# In production (when DEBUG is False), we should never use SQLite
 if DATABASE_URL:
     DATABASES = {
-        'default': dj_database_url.parse(DATABASE_URL)
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)
     }
-else:
+elif DEBUG:
+    # Only use SQLite in development
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
+else:
+    # Production without DATABASE_URL should fail
+    raise ValueError("DATABASE_URL environment variable is required in production")
 
 
 # Password validation
