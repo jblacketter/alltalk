@@ -1,0 +1,35 @@
+databases:
+  - name: dreamjournal-db
+    databaseName: dreamjournal
+    user: dreamjournal
+    plan: free
+
+services:
+  - type: web
+    name: dreamjournal
+    runtime: python
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn dreamjournal.wsgi:application"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dreamjournal-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: DEBUG
+        value: false
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: ALGOLIA_APPLICATION_ID
+        sync: false
+      - key: ALGOLIA_API_KEY
+        sync: false
+      - key: ALGOLIA_SEARCH_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+    autoDeploy: true
