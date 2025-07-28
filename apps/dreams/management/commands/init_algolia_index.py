@@ -1,7 +1,8 @@
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from apps.dreams.models import Dream
-from algoliasearch_django import get_adapter, clear_index, reindex_all
+from algoliasearch_django import get_adapter
+from algoliasearch_django.models import AlgoliaIndexError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,11 +33,11 @@ class Command(BaseCommand):
         
         try:
             # Get the model adapter
-            model = Dream
+            adapter = get_adapter(Dream)
             
             if options['clear']:
                 self.stdout.write('Clearing existing index...')
-                clear_index(model)
+                adapter.clear_index()
                 self.stdout.write(self.style.SUCCESS('Index cleared.'))
             
             # Get community dreams count
@@ -52,10 +53,26 @@ class Command(BaseCommand):
             self.stdout.write(f'Indexing {count} community dreams...')
             
             # Reindex all community dreams
-            reindex_all(model, batch_size=options['batch_size'])
+            indexed = 0
+            batch_size = options['batch_size']
+            
+            for start in range(0, count, batch_size):
+                end = min(start + batch_size, count)
+                batch = community_dreams[start:end]
+                
+                for dream in batch:
+                    try:
+                        adapter.save_record(dream)
+                        indexed += 1
+                    except Exception as e:
+                        self.stdout.write(
+                            self.style.WARNING(f'Failed to index dream {dream.id}: {e}')
+                        )
+                
+                self.stdout.write(f'Indexed {indexed}/{count} dreams...')
             
             self.stdout.write(
-                self.style.SUCCESS(f'Successfully indexed {count} dreams to Algolia!')
+                self.style.SUCCESS(f'Successfully indexed {indexed} dreams to Algolia!')
             )
             
         except Exception as e:

@@ -61,7 +61,7 @@ class AlgoliaSearchService:
         try:
             from apps.dreams.index import DreamIndex
             adapter = get_adapter(dream.__class__)
-            adapter.update_record(dream)
+            adapter.save_record(dream)
         except Exception as e:
             logger.error(f"Error updating dream {dream.id} in Algolia: {e}")
     
