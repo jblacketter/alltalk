@@ -1,5 +1,14 @@
 from django.contrib import admin
-from .models import Dream, DreamTag
+from .models import Dream, DreamTag, DreamImage
+
+
+class DreamImageInline(admin.TabularInline):
+    """Inline admin for dream images."""
+    model = DreamImage
+    extra = 1
+    fields = ['image', 'image_url', 'caption', 'order', 'thumbnail']
+    readonly_fields = ['thumbnail']
+    ordering = ['order']
 
 
 @admin.register(Dream)
@@ -9,6 +18,7 @@ class DreamAdmin(admin.ModelAdmin):
     search_fields = ['title', 'description', 'transcription', 'mood']
     readonly_fields = ['id', 'created_at', 'updated_at']
     date_hierarchy = 'dream_date'
+    inlines = [DreamImageInline]
     
     fieldsets = (
         ('Basic Information', {
@@ -44,3 +54,24 @@ class DreamTagAdmin(admin.ModelAdmin):
     def dream_count(self, obj):
         return obj.dreams.count()
     dream_count.short_description = 'Dreams'
+
+
+@admin.register(DreamImage)
+class DreamImageAdmin(admin.ModelAdmin):
+    list_display = ['__str__', 'dream', 'caption', 'order', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['dream__title', 'caption']
+    readonly_fields = ['thumbnail', 'created_at']
+    ordering = ['dream', 'order']
+    
+    fieldsets = (
+        ('Dream', {
+            'fields': ('dream',)
+        }),
+        ('Image', {
+            'fields': ('image', 'image_url', 'thumbnail')
+        }),
+        ('Details', {
+            'fields': ('caption', 'order', 'created_at')
+        })
+    )

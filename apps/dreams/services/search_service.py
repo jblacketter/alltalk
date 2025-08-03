@@ -1,6 +1,5 @@
 from django.conf import settings
 from algoliasearch.search.client import SearchClientSync
-from algoliasearch_django import get_adapter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -59,9 +58,29 @@ class AlgoliaSearchService:
             return
         
         try:
-            from apps.dreams.index import DreamIndex
-            adapter = get_adapter(dream.__class__)
-            adapter.save_record(dream)
+            # Manually create the record to ensure proper serialization
+            index = self.client.init_index(self.get_index_name())
+            
+            # Build the record with properly serialized data
+            record = {
+                'objectID': str(dream.id),  # Convert UUID to string
+                'title': dream.title or '',
+                'description': dream.description or '',
+                'mood': dream.mood or '',
+                'themes': dream.themes or [],
+                'symbols': dream.symbols or [],
+                'lucidity_level': dream.lucidity_level,
+                'dream_date': dream.dream_date.isoformat() if dream.dream_date else None,
+                'created_at': dream.created_at.isoformat() if dream.created_at else None,
+                'user_username': dream.user.username,
+                'user_id': str(dream.user.id),
+                'has_voice': bool(dream.voice_recording),
+            }
+            
+            # Save the record
+            index.save_object(record)
+            logger.info(f"Dream {dream.id} indexed in Algolia")
+            
         except Exception as e:
             logger.error(f"Error updating dream {dream.id} in Algolia: {e}")
     
@@ -71,9 +90,10 @@ class AlgoliaSearchService:
             return
         
         try:
-            from apps.dreams.index import DreamIndex
-            adapter = get_adapter(dream.__class__)
-            adapter.delete_record(dream)
+            index = self.client.init_index(self.get_index_name())
+            # Use string version of UUID for objectID
+            index.delete_object(str(dream.id))
+            logger.info(f"Dream {dream.id} removed from Algolia")
         except Exception as e:
             logger.error(f"Error removing dream {dream.id} from Algolia: {e}")
     

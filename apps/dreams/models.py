@@ -2,7 +2,12 @@ from django.db import models
 from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+from PIL import Image
 import uuid
+import os
+from io import BytesIO
+from django.core.files.base import ContentFile
 
 
 class Dream(models.Model):
@@ -135,3 +140,124 @@ class DreamTag(models.Model):
     
     def __str__(self):
         return self.name
+
+
+def dream_image_upload_path(instance, filename):
+    """Generate upload path for dream images."""
+    ext = filename.split('.')[-1]
+    filename = f"{uuid.uuid4()}.{ext}"
+    return f"dream_images/{instance.dream.user.id}/{instance.dream.id}/{filename}"
+
+
+class DreamImage(models.Model):
+    """Images associated with dreams."""
+    
+    dream = models.ForeignKey(
+        Dream,
+        on_delete=models.CASCADE,
+        related_name='images'
+    )
+    image = models.ImageField(
+        upload_to=dream_image_upload_path,
+        null=True,
+        blank=True,
+        help_text="Upload an image from your computer"
+    )
+    image_url = models.URLField(
+        max_length=500,
+        null=True,
+        blank=True,
+        help_text="Or provide a URL to an image"
+    )
+    thumbnail = models.ImageField(
+        upload_to=dream_image_upload_path,
+        null=True,
+        blank=True,
+        editable=False
+    )
+    caption = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Optional caption for the image"
+    )
+    order = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Order of display (lower numbers appear first)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'dream_images'
+        ordering = ['order', 'created_at']
+        indexes = [
+            models.Index(fields=['dream', 'order']),
+        ]
+    
+    def __str__(self):
+        return f"Image for {self.dream.title or 'Untitled Dream'}"
+    
+    def clean(self):
+        """Validate that either image or image_url is provided, but not both."""
+        if not self.image and not self.image_url:
+            raise ValidationError("Either upload an image or provide an image URL.")
+        if self.image and self.image_url:
+            raise ValidationError("Please provide either an image upload or URL, not both.")
+        
+        # Check max images per dream
+        if self.dream_id:
+            existing_count = DreamImage.objects.filter(dream=self.dream).exclude(pk=self.pk).count()
+            if existing_count >= 3:
+                raise ValidationError("A dream can have a maximum of 3 images.")
+    
+    def save(self, *args, **kwargs):
+        """Process and optimize image before saving."""
+        if self.image:
+            # Open the image
+            img = Image.open(self.image)
+            
+            # Convert RGBA to RGB if necessary
+            if img.mode in ('RGBA', 'LA', 'P'):
+                # Create a white background
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = background
+            
+            # Resize if too large (max 1920x1080)
+            max_size = (1920, 1080)
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+            
+            # Save optimized image
+            output = BytesIO()
+            img.save(output, format='JPEG', quality=85, optimize=True)
+            output.seek(0)
+            
+            # Update the image field
+            self.image = ContentFile(output.read(), name=self.image.name.replace('.png', '.jpg'))
+            
+            # Create thumbnail (300x300)
+            img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+            thumb_output = BytesIO()
+            img.save(thumb_output, format='JPEG', quality=85, optimize=True)
+            thumb_output.seek(0)
+            
+            # Save thumbnail
+            thumb_name = f"thumb_{self.image.name}"
+            self.thumbnail = ContentFile(thumb_output.read(), name=thumb_name)
+        
+        super().save(*args, **kwargs)
+    
+    @property
+    def display_url(self):
+        """Return the URL for displaying the image."""
+        if self.image:
+            return self.image.url
+        return self.image_url
+    
+    @property
+    def thumbnail_url(self):
+        """Return the thumbnail URL or fallback to main image."""
+        if self.thumbnail:
+            return self.thumbnail.url
+        return self.display_url

@@ -44,7 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third party apps
     'django_htmx',
-    'algoliasearch_django',
+    # 'algoliasearch_django',  # Disabled - causing UUID serialization issues, using manual indexing instead
     # Local apps
     'apps.users',
     'apps.dreams',

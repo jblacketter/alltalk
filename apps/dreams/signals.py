@@ -27,16 +27,21 @@ def update_dream_in_algolia(sender, instance, created, **kwargs):
     if not algolia_search.enabled:
         return
     
-    # If dream is community, add/update in Algolia
-    if instance.privacy_level == 'community':
-        algolia_search.update_dream_index(instance)
-        logger.info(f"Dream {instance.id} indexed in Algolia")
-    
-    # If privacy changed from community to something else, remove from Algolia
-    elif hasattr(instance, '_privacy_changed') and instance._privacy_changed:
-        if hasattr(instance, '_old_privacy') and instance._old_privacy == 'community':
-            algolia_search.remove_dream_from_index(instance)
-            logger.info(f"Dream {instance.id} removed from Algolia (no longer community)")
+    try:
+        # If dream is community, add/update in Algolia
+        if instance.privacy_level == 'community':
+            algolia_search.update_dream_index(instance)
+            logger.info(f"Dream {instance.id} indexed in Algolia")
+        
+        # If privacy changed from community to something else, remove from Algolia
+        elif hasattr(instance, '_privacy_changed') and instance._privacy_changed:
+            if hasattr(instance, '_old_privacy') and instance._old_privacy == 'community':
+                algolia_search.remove_dream_from_index(instance)
+                logger.info(f"Dream {instance.id} removed from Algolia (no longer community)")
+    except Exception as e:
+        # Log the error but don't prevent the dream from being saved
+        logger.error(f"Error updating Algolia index for dream {instance.id}: {e}")
+        # Continue without raising the exception
 
 
 @receiver(post_delete, sender=Dream)

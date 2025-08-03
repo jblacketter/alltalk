@@ -1,5 +1,7 @@
 from django import forms
-from .models import Dream, DreamTag
+from django.forms import formset_factory
+from .models import Dream, DreamTag, DreamImage
+from django.core.exceptions import ValidationError
 
 
 class DreamForm(forms.ModelForm):
@@ -82,3 +84,48 @@ class DreamForm(forms.ModelForm):
             self.fields['tags'].initial = ', '.join(
                 tag.name for tag in self.instance.tags.all()
             )
+
+
+class DreamImageForm(forms.ModelForm):
+    """Form for individual dream images."""
+    
+    class Meta:
+        model = DreamImage
+        fields = ['image', 'image_url', 'caption', 'order']
+        widgets = {
+            'image': forms.FileInput(attrs={
+                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-purple-500 focus:border-purple-500',
+                'accept': 'image/*'
+            }),
+            'image_url': forms.URLInput(attrs={
+                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-purple-500 focus:border-purple-500',
+                'placeholder': 'Or paste an image URL'
+            }),
+            'caption': forms.TextInput(attrs={
+                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-purple-500 focus:border-purple-500',
+                'placeholder': 'Optional caption'
+            }),
+            'order': forms.HiddenInput()
+        }
+    
+    def clean(self):
+        cleaned_data = super().clean()
+        image = cleaned_data.get('image')
+        image_url = cleaned_data.get('image_url')
+        
+        if not image and not image_url:
+            raise ValidationError("Please provide either an image upload or URL.")
+        if image and image_url:
+            raise ValidationError("Please provide either an image upload or URL, not both.")
+        
+        # Validate file size (max 5MB)
+        if image and image.size > 5 * 1024 * 1024:
+            raise ValidationError("Image file size cannot exceed 5MB.")
+        
+        return cleaned_data
+
+
+# Simple form for handling multiple image uploads at once
+class MultipleImageUploadForm(forms.Form):
+    """Form for uploading multiple images at once."""
+    pass  # We'll handle file uploads directly in the view using request.FILES

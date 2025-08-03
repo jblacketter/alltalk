@@ -6,10 +6,13 @@ from django.http import JsonResponse
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils import timezone
-from .models import Dream, DreamTag
-from .forms import DreamForm
+from .models import Dream, DreamTag, DreamImage
+from .forms import DreamForm, MultipleImageUploadForm
 from .services.ai_service import ai_service
 import json
+import requests
+from django.core.files.base import ContentFile
+from urllib.parse import urlparse
 
 
 def home(request):
@@ -89,6 +92,8 @@ def dream_create(request):
     """Create a new dream."""
     if request.method == 'POST':
         form = DreamForm(request.POST, request.FILES)
+        image_form = MultipleImageUploadForm(request.POST, request.FILES)
+        
         if form.is_valid():
             dream = form.save(commit=False)
             dream.user = request.user
@@ -111,6 +116,44 @@ def dream_create(request):
                 dream.entities = analysis.get('entities', [])
                 dream.save()
             
+            # Handle image uploads
+            images = request.FILES.getlist('images')
+            image_urls = request.POST.getlist('image_url[]')
+            captions = request.POST.getlist('image_caption[]')
+            
+            # Process uploaded images
+            for i, image in enumerate(images[:3]):  # Limit to 3 images
+                caption = captions[i] if i < len(captions) else ''
+                DreamImage.objects.create(
+                    dream=dream,
+                    image=image,
+                    caption=caption,
+                    order=i
+                )
+            
+            # Process image URLs
+            start_index = len(images)
+            for i, url in enumerate(image_urls[:3-len(images)]):  # Remaining slots
+                if url.strip():
+                    caption = captions[start_index + i] if (start_index + i) < len(captions) else ''
+                    try:
+                        # Download image from URL
+                        response = requests.get(url, timeout=10)
+                        if response.status_code == 200:
+                            # Get filename from URL
+                            parsed_url = urlparse(url)
+                            filename = parsed_url.path.split('/')[-1] or 'image.jpg'
+                            
+                            dream_image = DreamImage(
+                                dream=dream,
+                                caption=caption,
+                                order=start_index + i
+                            )
+                            dream_image.image.save(filename, ContentFile(response.content))
+                            dream_image.save()
+                    except Exception as e:
+                        messages.warning(request, f"Could not download image from URL: {url}")
+            
             messages.success(request, 'Dream recorded successfully!')
             
             # Check if save and continue editing
@@ -120,8 +163,13 @@ def dream_create(request):
                 return redirect('dreams:detail', pk=dream.pk)
     else:
         form = DreamForm(initial={'privacy_level': request.user.default_privacy})
+        image_form = MultipleImageUploadForm()
     
-    return render(request, 'dreams/dream_form.html', {'form': form, 'action': 'Create'})
+    return render(request, 'dreams/dream_form.html', {
+        'form': form,
+        'image_form': image_form,
+        'action': 'Create'
+    })
 
 
 @login_required
@@ -131,6 +179,16 @@ def dream_edit(request, pk):
     
     if request.method == 'POST':
         form = DreamForm(request.POST, request.FILES, instance=dream)
+        
+        # Handle image deletion
+        delete_images = request.POST.getlist('delete_image[]')
+        for image_id in delete_images:
+            try:
+                image = DreamImage.objects.get(pk=image_id, dream=dream)
+                image.delete()
+            except DreamImage.DoesNotExist:
+                pass
+        
         if form.is_valid():
             dream = form.save()
             
@@ -151,6 +209,46 @@ def dream_edit(request, pk):
                     dream.entities = analysis.get('entities', [])
                     dream.save()
             
+            # Handle new image uploads
+            existing_images = dream.images.count()
+            images = request.FILES.getlist('images')
+            image_urls = request.POST.getlist('image_url[]')
+            captions = request.POST.getlist('image_caption[]')
+            
+            # Process uploaded images
+            for i, image in enumerate(images[:3-existing_images]):  # Limit total to 3
+                caption = captions[i] if i < len(captions) else ''
+                DreamImage.objects.create(
+                    dream=dream,
+                    image=image,
+                    caption=caption,
+                    order=existing_images + i
+                )
+            
+            # Process image URLs
+            start_index = len(images)
+            remaining_slots = 3 - existing_images - len(images)
+            for i, url in enumerate(image_urls[:remaining_slots]):
+                if url.strip():
+                    caption = captions[start_index + i] if (start_index + i) < len(captions) else ''
+                    try:
+                        # Download image from URL
+                        response = requests.get(url, timeout=10)
+                        if response.status_code == 200:
+                            # Get filename from URL
+                            parsed_url = urlparse(url)
+                            filename = parsed_url.path.split('/')[-1] or 'image.jpg'
+                            
+                            dream_image = DreamImage(
+                                dream=dream,
+                                caption=caption,
+                                order=existing_images + start_index + i
+                            )
+                            dream_image.image.save(filename, ContentFile(response.content))
+                            dream_image.save()
+                    except Exception as e:
+                        messages.warning(request, f"Could not download image from URL: {url}")
+            
             messages.success(request, 'Dream updated successfully!')
             
             # Check if save and continue editing
@@ -161,7 +259,16 @@ def dream_edit(request, pk):
     else:
         form = DreamForm(instance=dream)
     
-    return render(request, 'dreams/dream_form.html', {'form': form, 'action': 'Edit', 'dream': dream})
+    # Get existing images
+    existing_images = dream.images.all()
+    
+    return render(request, 'dreams/dream_form.html', {
+        'form': form,
+        'action': 'Edit',
+        'dream': dream,
+        'existing_images': existing_images,
+        'image_form': MultipleImageUploadForm()
+    })
 
 
 @login_required
