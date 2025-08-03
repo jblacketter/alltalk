@@ -13,6 +13,9 @@ import json
 import requests
 from django.core.files.base import ContentFile
 from urllib.parse import urlparse
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def home(request):
@@ -116,43 +119,52 @@ def dream_create(request):
                 dream.entities = analysis.get('entities', [])
                 dream.save()
             
-            # Handle image uploads
-            images = request.FILES.getlist('images')
-            image_urls = request.POST.getlist('image_url[]')
-            captions = request.POST.getlist('image_caption[]')
+            # Handle image uploads (with error handling for missing table)
+            try:
+                images = request.FILES.getlist('images')
+                image_urls = request.POST.getlist('image_url[]')
+                captions = request.POST.getlist('image_caption[]')
+                
+                # Process uploaded images
+                for i, image in enumerate(images[:3]):  # Limit to 3 images
+                    caption = captions[i] if i < len(captions) else ''
+                    DreamImage.objects.create(
+                        dream=dream,
+                        image=image,
+                        caption=caption,
+                        order=i
+                    )
+            except Exception as e:
+                # Log error but don't fail the entire dream creation
+                logger.error(f"Error saving images for dream {dream.id}: {e}")
+                messages.warning(request, "Dream saved but images could not be uploaded. Please try editing the dream to add images.")
             
-            # Process uploaded images
-            for i, image in enumerate(images[:3]):  # Limit to 3 images
-                caption = captions[i] if i < len(captions) else ''
-                DreamImage.objects.create(
-                    dream=dream,
-                    image=image,
-                    caption=caption,
-                    order=i
-                )
-            
-            # Process image URLs
-            start_index = len(images)
-            for i, url in enumerate(image_urls[:3-len(images)]):  # Remaining slots
-                if url.strip():
-                    caption = captions[start_index + i] if (start_index + i) < len(captions) else ''
-                    try:
-                        # Download image from URL
-                        response = requests.get(url, timeout=10)
-                        if response.status_code == 200:
-                            # Get filename from URL
-                            parsed_url = urlparse(url)
-                            filename = parsed_url.path.split('/')[-1] or 'image.jpg'
-                            
-                            dream_image = DreamImage(
-                                dream=dream,
-                                caption=caption,
-                                order=start_index + i
-                            )
-                            dream_image.image.save(filename, ContentFile(response.content))
-                            dream_image.save()
-                    except Exception as e:
-                        messages.warning(request, f"Could not download image from URL: {url}")
+            # Process image URLs (with error handling for missing table)
+            try:
+                start_index = len(images)
+                for i, url in enumerate(image_urls[:3-len(images)]):  # Remaining slots
+                    if url.strip():
+                        caption = captions[start_index + i] if (start_index + i) < len(captions) else ''
+                        try:
+                            # Download image from URL
+                            response = requests.get(url, timeout=10)
+                            if response.status_code == 200:
+                                # Get filename from URL
+                                parsed_url = urlparse(url)
+                                filename = parsed_url.path.split('/')[-1] or 'image.jpg'
+                                
+                                dream_image = DreamImage(
+                                    dream=dream,
+                                    caption=caption,
+                                    order=start_index + i
+                                )
+                                dream_image.image.save(filename, ContentFile(response.content))
+                                dream_image.save()
+                        except Exception as e:
+                            messages.warning(request, f"Could not download image from URL: {url}")
+            except Exception as e:
+                # Table might not exist yet
+                pass
             
             messages.success(request, 'Dream recorded successfully!')
             
